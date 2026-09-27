@@ -31,11 +31,64 @@
 #include <string.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <time.h>
+#include <stdatomic.h>
 
 #if defined(_GLFW_ANDROID)
 #include "android_egl_context_hook.h"
 #include "mojoexec.h"
 #endif
+
+#define FPS_WINDOW_CAPACITY 256
+
+static _Atomic uint64_t g_frame_timestamps[FPS_WINDOW_CAPACITY];
+static _Atomic size_t g_frame_head = 0;
+
+static inline uint64_t get_monotonic_time_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
+}
+
+__attribute__((used, visibility("default"))) void nativeOnFrameRendered(void) {
+    uint64_t now_ns = get_monotonic_time_ns();
+    size_t idx = atomic_fetch_add_explicit(&g_frame_head, 1, memory_order_relaxed) % FPS_WINDOW_CAPACITY;
+    atomic_store_explicit(&g_frame_timestamps[idx], now_ns, memory_order_relaxed);
+}
+
+__attribute__((used, visibility("default"))) int nativeGetFps(void) {
+    uint64_t now_ns = get_monotonic_time_ns();
+    uint64_t one_sec_ago = (now_ns > 1000000000ULL) ? (now_ns - 1000000000ULL) : 0;
+
+    size_t current_head = atomic_load_explicit(&g_frame_head, memory_order_relaxed);
+
+    int frame_count = 0;
+    uint64_t oldest_valid_ts = now_ns;
+
+    for (size_t i = 0; i < FPS_WINDOW_CAPACITY; ++i) {
+        size_t idx = (current_head + FPS_WINDOW_CAPACITY - 1 - i) % FPS_WINDOW_CAPACITY;
+        uint64_t ts = atomic_load_explicit(&g_frame_timestamps[idx], memory_order_relaxed);
+
+        if (ts == 0 || ts < one_sec_ago) {
+            break;
+        }
+
+        frame_count++;
+        oldest_valid_ts = ts;
+    }
+
+    if (frame_count < 2) {
+        return frame_count;
+    }
+
+    uint64_t elapsed_ns = now_ns - oldest_valid_ts;
+    if (elapsed_ns == 0) {
+        return frame_count;
+    }
+
+    double fps = ((double)frame_count * 1000000000.0) / (double)elapsed_ns;
+    return (int)(fps + 0.5);
+}
 
 // Return a description of the specified EGL error
 //
@@ -322,6 +375,7 @@ static void swapBuffersEGL(_GLFWwindow* window)
 #endif
 
     eglSwapBuffers(_glfw.egl.display, window->context.egl.surface);
+    nativeOnFrameRendered();
 }
 
 static void swapIntervalEGL(int interval)
