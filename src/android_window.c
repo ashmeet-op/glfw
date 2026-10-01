@@ -1421,14 +1421,26 @@ Java_git_artdeell_dnbootstrap_glfw_GLFW_nativeSurfaceDestroyed(JNIEnv *env,
     surfaceDestroyed = true;
     if(!ownedByVulkan && surfaceInUse) {
         pthread_mutex_lock(&nw_egl_mutex);
-        pthread_cond_wait(&nw_egl_cond, &nw_egl_mutex);
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ts.tv_nsec += 100000000L; // 100ms timeout
+        if (ts.tv_nsec >= 1000000000L) {
+            ts.tv_sec += ts.tv_nsec / 1000000000L;
+            ts.tv_nsec %= 1000000000L;
+        }
+        pthread_cond_timedwait(&nw_egl_cond, &nw_egl_mutex, &ts);
         LOGI("Unhalted after window destruction");
-        ANativeWindow_release(nativeWindow);
-        nativeWindow = NULL;
+        if (nativeWindow) {
+            ANativeWindow_release(nativeWindow);
+            nativeWindow = NULL;
+        }
+        surfaceInUse = false;
         pthread_mutex_unlock(&nw_egl_mutex);
     }else {
-        ANativeWindow_release(nativeWindow);
-        nativeWindow = NULL;
+        if (nativeWindow) {
+            ANativeWindow_release(nativeWindow);
+            nativeWindow = NULL;
+        }
     }
 
 }
