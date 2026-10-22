@@ -393,8 +393,13 @@ static void android_reconfigure_context(const _GLFWctxconfig *ctxconfig, _GLFWct
 
     if(mojoexec_renderspec.force_gles_context) {
         target->client = GLFW_OPENGL_ES_API;
-        target->major = mojoexec_renderspec.override_major_version;
+        target->major = (mojoexec_renderspec.override_major_version > 0) ? mojoexec_renderspec.override_major_version : 3;
+        if (target->major > 3) {
+            target->major = 3;
+        }
         target->minor = 0;
+        target->profile = GLFW_OPENGL_ANY_PROFILE;
+        target->forward = GLFW_FALSE;
     }
 }
 
